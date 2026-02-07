@@ -43,4 +43,12 @@ dist/
 # 念のため全階層もカバー
 **/投稿素材/**
 **/投稿済み/**
+
+# --- Playwright関連 ---
+.playwright/
+playwright-report/
+token.pickle
+logs/
+client_secret_*.json
+chrome-data/
 EOF

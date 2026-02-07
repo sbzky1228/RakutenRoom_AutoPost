@@ -1,0 +1,53 @@
+【プロジェクト名】
+RakutenRoom_AutoPost
+
+【テーマ】
+楽天ROOMへの自動投稿
+
+【言語】
+Python
+【フレームワーク】
+Playwright
+
+【Googleスプレッドシートの項目】
+A ⇒ ItemURL
+B ⇒ ShopCode
+C ⇒ ItemID
+D ⇒ ItemCode
+E ⇒ ItemName
+F ⇒ Collection
+G ⇒ PostStatus
+H ⇒ PostedDate
+I ⇒ CollectionStatus
+J ⇒ CollectedDate
+
+【.env】
+RAKUTEN_USER_ID = "楽天市場のユーザーID"
+RAKUTEN_PASSWORD = "楽天市場のパスワード"
+SPREADSHEET_ID = "GoogleスプレッドシートのID"
+SHEET_NAME = "スプレッドシートのシート名"
+RAKUTEN_APP_ID = "楽天APIのAPP ID"
+OPENAI_API_KEY = "ChatGPTのAPI KEY"
+
+【処理内容】
+1.楽天市場にログイン。
+2.お気に入りページに登録されている商品のURLをすべて取得。
+　- 取得した商品URLを保持し、shopCode、itemIdからitemCodeを作成する。
+3.楽天APIを使い、ItemNameを取得する。(楽天APIのインプット情報にはitemCodeを使用。)
+4.ItemURL、ShopCode、ItemId、ItemCode、ItemNameをGoogleスプレッドシートに記載。
+　- itemCodeを確認し、一致している場合はスプレッドシートに転記しない。
+※2～4をお気に入りページに登録されている商品数だけ繰り返す。※
+5.Googleスプレッドシートから一件選択し登録する。
+　- Googleスプレッドシートの上から確認し、PostStatusが「済」を飛ばし、未登録のものを登録対象とする。
+6.登録する商品の商品ページを開き、「ROOMに投稿」ボタンを押す。
+　- 「ROOMに投稿」ボタンがない場合は次のアイテムを登録する。
+7.ChatGPTに紹介文を作成してもらい、コピーする。
+　- ChatGPTには以下の文章で紹介文を作成依頼して。
+　　「"ItemName"を楽天ROOMに紹介するため、200文字以内で紹介文を作成して。」
+8,7でChatGPTに作成してもらった紹介文を投稿ページに、「完了」ボタンを押す。
+9.登録が完了したら、GoogleスプレッドシートのPostStatusを「済」、PostedDateに投稿日を記載する。※日付は最初に取得しとくこと
+10.投稿アイテムのCollectionを確認し、登録するCollectionが記載されていれば、Collectionに登録する。
+　- Collectionに記載がない場合はCollectionへの登録はしない。
+11.登録完了を確認し、CollectionStatusに「済」を記載し、CollectedDateに登録日付を記載する。※日付は最初に取得しとくこと
+10.プログラムを完了する。(開いたページはすべて閉じること。)
+
