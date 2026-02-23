@@ -44,25 +44,15 @@ class ChatGPTManager:
             return ""
 
 
-def generate_descriptions_for_items(items: list) -> Dict:
+def generate_description(item_name: str) -> str:
     """
-    複数の商品に対して紹介文を生成
+    ChatGPTで商品紹介文を生成
     
     Args:
-        items: 商品リスト
+        item_name: 商品名
     
     Returns:
-        Dict: item_codeをキーとした紹介文の辞書
+        str: 生成された紹介文
     """
     manager = ChatGPTManager()
-    descriptions = {}
-    
-    for item in items:
-        item_code = item.get('ItemCode', '')
-        item_name = item.get('ItemName', '')
-        
-        if item_code and item_name:
-            description = manager.generate_description(item_name)
-            descriptions[item_code] = description
-    
-    return descriptions
+    return manager.generate_description(item_name)
