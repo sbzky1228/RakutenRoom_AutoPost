@@ -91,16 +91,16 @@ class GoogleSheetsManager:
             
             # ヘッダー行をスキップして処理
             for row in values[1:] if len(values) > 1 else []:
-                if len(row) >= 10:
+                if len(row) >= 7:
                     post_status = row[6] if len(row) > 6 else ''
-                    if post_status != '済':  # 未投稿の場合
+                    if post_status == '未':  # 未投稿の場合のみ
                         items.append({
                             'ItemURL': row[0] if len(row) > 0 else '',
                             'ShopCode': row[1] if len(row) > 1 else '',
                             'ItemID': row[2] if len(row) > 2 else '',
                             'ItemCode': row[3] if len(row) > 3 else '',
                             'ItemName': row[4] if len(row) > 4 else '',
-                            'Collection': row[5] if len(row) > 5 else '',
+                            'CollectionName': row[5] if len(row) > 5 else '',
                             'PostStatus': row[6] if len(row) > 6 else '',
                             'PostedDate': row[7] if len(row) > 7 else '',
                             'CollectionStatus': row[8] if len(row) > 8 else '',
@@ -114,8 +114,8 @@ class GoogleSheetsManager:
             print(f"✗ スプレッドシートからのデータ取得に失敗しました: {e}")
             return []
     
-    def update_post_status(self, item_code: str, posted_date: str):
-        """投稿ステータスを更新"""
+    def update_post_status_by_url(self, item_url: str, status: str, posted_date: str):
+        """ItemURLで投稿ステータスを更新"""
         try:
             range_name = f"{self.sheet_name}!A:J"
             result = self.service.spreadsheets().values().get(
@@ -126,10 +126,10 @@ class GoogleSheetsManager:
             values = result.get('values', [])
             
             for i, row in enumerate(values[1:], start=2):
-                if len(row) > 3 and row[3] == item_code:
+                if len(row) > 0 and row[0] == item_url:
                     # G列（PostStatus）とH列（PostedDate）を更新
                     update_range = f"{self.sheet_name}!G{i}:H{i}"
-                    update_body = {'values': [['済', posted_date]]}
+                    update_body = {'values': [[status, posted_date]]}
                     
                     self.service.spreadsheets().values().update(
                         spreadsheetId=self.spreadsheet_id,
@@ -138,10 +138,10 @@ class GoogleSheetsManager:
                         body=update_body
                     ).execute()
                     
-                    print(f"✓ 商品 {item_code} の投稿ステータスを更新しました")
+                    print(f"✓ 商品 {item_url} の投稿ステータスを '{status}' に更新しました")
                     return True
             
-            print(f"✗ 商品コード {item_code} が見つかりません")
+            print(f"✗ ItemURL {item_url} が見つかりません")
             return False
         
         except Exception as e:

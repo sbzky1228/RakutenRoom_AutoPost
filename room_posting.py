@@ -116,62 +116,87 @@ async def find_post_button(page: Page):
     return None
 
 
-async def add_to_collection(page: Page, collection_name: str) -> bool:
+async def post_item_to_room(page: Page, description: str, shop_code: str) -> bool:
     """
-    投稿した商品をコレクションに追加
+    商品ページからROOMに投稿
     
     Args:
-        page: Playwrightのページオブジェクト
-        collection_name: コレクション名
+        page: Playwrightのページオブジェクト (商品ページの状態)
+        description: 紹介文
+        shop_code: ショップコード
     
     Returns:
-        bool: 追加成功時True、失敗時False
+        bool: 投稿成功時True、失敗時False
     """
     try:
-        if not collection_name or collection_name.strip() == '':
-            print("コレクション名が指定されていません")
-            return False
+        # 「ROOMに投稿」ボタンを探す
+        if shop_code == '213310':
+            # シェアボタンからROOM投稿
+            share_button = await page.query_selector("button:has-text('シェア'), a:has-text('シェア')")
+            if share_button:
+                await share_button.click()
+                await asyncio.sleep(1)
+                # 「ROOMに投稿する」ボタンを探す
+                room_post_button = await page.query_selector("button:has-text('ROOMに投稿する'), a:has-text('ROOMに投稿する')")
+                if room_post_button:
+                    await room_post_button.click()
+                else:
+                    print("✗ 「ROOMに投稿する」ボタンが見つかりません")
+                    return False
+            else:
+                print("✗ シェアボタンが見つかりません")
+                return False
+        else:
+            # 通常の「ROOMに投稿」ボタン
+            post_button = await find_post_button(page)
+            if not post_button:
+                print("✗ 「ROOMに投稿」ボタンが見つかりません")
+                return False
+            await post_button.click()
         
-        # コレクション追加ボタンを探す
-        add_collection_button = await page.query_selector(
-            "button:has-text('コレクションに追加'), button.add-to-collection"
-        )
-        
-        if not add_collection_button:
-            print("✗ コレクション追加ボタンが見つかりません")
-            return False
-        
-        await add_collection_button.click()
-        await asyncio.sleep(1)
-        
-        # コレクション選択ダイアログを待つ
         await page.wait_for_load_state('networkidle')
+        await asyncio.sleep(2)
         
-        # 指定されたコレクション名を探す
-        collection_option = await page.query_selector(
-            f"input[value='{collection_name}'], label:has-text('{collection_name}')"
+        print("「ROOMに投稿」ボタンをクリックしました")
+        
+        # 紹介文を入力するテキストエリアを探す
+        description_textarea = await page.query_selector(
+            "textarea[placeholder*='紹介文'], textarea.description, div[contenteditable='true']"
         )
         
-        if collection_option:
-            await collection_option.click()
-            await asyncio.sleep(1)
+        if description_textarea:
+            # クリップボードに紹介文をコピー
+            pyperclip.copy(description)
             
-            # 「完了」または「保存」ボタンをクリック
-            save_button = await page.query_selector(
-                "button:has-text('完了'), button:has-text('保存')"
+            # テキストエリアをクリック
+            await description_textarea.click()
+            await asyncio.sleep(0.5)
+            
+            # Ctrl+Aで全選択してから貼り付け
+            await page.keyboard.press('Control+A')
+            await page.keyboard.press('Control+V')
+            
+            print("紹介文を入力しました")
+            
+            # 「完了」ボタンをクリック
+            complete_button = await page.query_selector(
+                "button:has-text('完了'), button:has-text('投稿する'), button.submit"
             )
             
-            if save_button:
-                await save_button.click()
+            if complete_button:
+                await complete_button.click()
                 await page.wait_for_load_state('networkidle')
                 await asyncio.sleep(2)
                 
-                print(f"✓ コレクション '{collection_name}' に追加しました")
+                print("✓ ROOMへの投稿に成功しました")
                 return True
-        
-        print(f"✗ コレクション '{collection_name}' が見つかりません")
-        return False
+            else:
+                print("✗ 「完了」ボタンが見つかりません")
+                return False
+        else:
+            print("✗ 紹介文入力フィールドが見つかりません")
+            return False
     
     except Exception as e:
-        print(f"✗ コレクション追加処理でエラーが発生しました: {e}")
+        print(f"✗ 投稿処理でエラーが発生しました: {e}")
         return False
