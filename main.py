@@ -6,16 +6,15 @@ import datetime
 from browser_manager import create_browser_manager
 from rakuten_login import login_to_rakuten
 from google_sheets_manager import GoogleSheetsManager
+from google_sheets_utils import connect_to_sheets_and_get_existing_codes
 from chatgpt_manager import generate_description
 from room_posting import post_item_to_room
 from logger import Logger
-from config import Config
 
 
 async def main():
     """メイン処理"""
     logger = Logger()
-    config = Config()
     browser_manager = None
 
     try:
@@ -28,7 +27,16 @@ async def main():
         posted_date = now.strftime('%Y-%m-%d')
 
         # Google Sheetsマネージャーを初期化
-        sheets_manager = GoogleSheetsManager()
+        logger.info("スプレッドシートへの接続を確認しています...")
+        service, existing_item_codes = connect_to_sheets_and_get_existing_codes()
+
+        if service is None:
+            logger.error("スプレッドシートへの接続に失敗しました。処理を終了します。")
+            return
+
+        logger.info(f"接続成功（既存商品数: {len(existing_item_codes)}件）")
+
+        sheets_manager = GoogleSheetsManager(service)
 
         # PostStatusが「未」の商品を取得
         logger.info("Googleスプレッドシートから未投稿の商品を取得しています...")
@@ -39,6 +47,10 @@ async def main():
             return
 
         logger.info(f"{len(unposted_items)}件の投稿対象商品があります")
+
+        # 最初の1件だけ処理
+        item = unposted_items[0]
+        logger.info(f"取得した投稿対象商品(1件): {item}")
 
         # ブラウザを起動
         logger.info("ブラウザを起動しています...")
@@ -51,40 +63,41 @@ async def main():
             logger.error("楽天へのログインに失敗しました")
             return
 
-        # 各商品を処理
-        for item in unposted_items:
-            item_url = item.get('ItemURL', '')
-            item_name = item.get('ItemName', '')
-            shop_code = item.get('ShopCode', '')
+        # 1件だけ処理
+        item_url = item.get('ItemURL', '')
+        item_name = item.get('ItemName', '')
+        shop_code = item.get('ShopCode', '')
 
-            if not item_url or not item_name:
-                logger.warning(f"必要な情報が不足しているため、スキップします: {item_name}")
-                continue
+        if not item_url or not item_name:
+            logger.warning(f"必要な情報が不足しているため、処理を中止します: {item_name}")
+            return
 
-            logger.info(f"商品を処理しています: {item_name}")
+        logger.info(f"商品を処理しています: {item_name}")
 
-            # 商品ページを開く
-            await page.goto(item_url)
-            await page.wait_for_load_state('networkidle')
+        # 商品ページを開く
+        await page.goto(item_url)
+        await page.wait_for_load_state('load')
 
-            # ChatGPTで紹介文を生成
-            logger.info(f"ChatGPTで紹介文を生成しています: {item_name}")
-            description = generate_description(item_name)
-            if not description:
-                logger.warning(f"紹介文の生成に失敗したため、スキップします: {item_name}")
-                sheets_manager.update_post_status(item_url, '不可', posted_date)
-                continue
+        # ChatGPTで紹介文を生成
+        logger.info(f"ChatGPTで紹介文を生成しています: {item_name}")
+        description = generate_description(item_name)
+        if not description:
+            logger.warning(f"紹介文の生成に失敗したため、処理を中止します: {item_name}")
+            sheets_manager.update_post_status_by_url(item_url, '不可', posted_date)
+            return
 
-            # ROOMに投稿
-            logger.info(f"ROOMに投稿しています: {item_name}")
-            success = await post_item_to_room(page, description, shop_code)
+        # ROOMに投稿
+        logger.info(f"ROOMに投稿しています: {item_name}")
+        success = await post_item_to_room(page, description, shop_code)
 
-            if success:
-                logger.info(f"投稿に成功しました: {item_name}")
-                sheets_manager.update_post_status_by_url(item_url, '済', posted_date)
-            else:
-                logger.warning(f"投稿に失敗しました: {item_name}")
-                sheets_manager.update_post_status_by_url(item_url, '不可', posted_date)
+        if success:
+            logger.info(f"投稿に成功しました: {item_name}")
+            # 投稿完了の場合はスプレッドシートのPostStatusを「済」、PostedDateを投稿日で更新する
+            sheets_manager.update_post_status_by_url(item_url, '済', posted_date)
+        else:
+            logger.warning(f"投稿に失敗しました: {item_name}")
+            # 投稿失敗の場合はスプレッドシートのPostStatusを「不可」、PostedDateを投稿日で更新する
+            sheets_manager.update_post_status_by_url(item_url, '不可', posted_date)
 
         logger.info("=" * 80)
         logger.info("楽天Room自動投稿プログラムが完了しました")
