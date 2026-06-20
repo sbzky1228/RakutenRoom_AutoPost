@@ -20,10 +20,9 @@
 - 楽天へのログイン処理
 - ログイン認証情報の入力
 
-#### 4. **fetch_favorites.py**
-- 楽天市場のお気に入り商品情報取得
-- URLからの商品情報抽出
-- 楽天APIを使用した詳細情報取得
+#### 4. **google_sheets_utils.py**
+- Google Sheets APIへの接続とサービスオブジェクトの取得
+- サービスアカウント認証の管理
 
 #### 5. **google_sheets_manager.py**
 - Google Sheets APIの操作
@@ -85,14 +84,18 @@ RAKUTEN_USER_ID=your_user_id
 RAKUTEN_PASSWORD=your_password
 SPREADSHEET_ID=your_spreadsheet_id
 SHEET_NAME=Sheet1
-RAKUTEN_APP_ID=your_app_id
+SERVICE_ACCOUNT_PATH=path/to/service_account.json
 OPENAI_API_KEY=your_openai_api_key
-DRIVER_PATH=
+PLAYWRIGHT_BROWSERS_PATH=path/to/ms-playwright
 ```
 
+- `PLAYWRIGHT_BROWSERS_PATH` は必要に応じて指定します。
+- 未指定の場合、実行ファイルでは `%LOCALAPPDATA%\ms-playwright` を自動検出します。
+
 ### 3. Google認証の設定
-- Google Cloud ConsoleでOAuth 2.0認証情報を作成
-- `client_secret_*.json` ファイルをプロジェクトディレクトリに配置
+- Google Cloud Consoleでサービスアカウントを作成
+- サービスアカウントのJSONキーをダウンロード
+- ダウンロードしたJSONファイルのパスを `SERVICE_ACCOUNT_PATH` に設定
 
 ## 実行方法
 
@@ -101,10 +104,50 @@ DRIVER_PATH=
 python main.py
 ```
 
-### テスト実行
+> 現在、未投稿商品のうち最初の1件のみ処理します。
+
+## 実行ファイルの作成
+
+### 1. 実行ファイルを作成する手順
 ```bash
-python test.py
+pyinstaller --onefile --name RakutenRoomAutoPost main.py
 ```
+
+- `--onefile` を付けると `dist\RakutenRoomAutoPost.exe` が生成されます。
+- `--onefile` を付けない場合は `dist\RakutenRoomAutoPost\` フォルダに実行ファイルと依存ファイルが出力されます。
+
+### 2. 実行時に必要な外部ファイル
+実行ファイルと同じ階層に `.env` を配置してください。`config.py` は実行ファイルのあるフォルダの `.env` を探して読み込みます。
+
+- `dist\RakutenRoomAutoPost.exe`
+- `dist\.env`
+- サービスアカウントJSONファイル（`SERVICE_ACCOUNT_PATH` で指定）
+
+### 3. Playwright のブラウザが必要
+実行ファイルでも `playwright` のブラウザがインストールされている必要があります。生成前に以下を実行してください。
+
+```bash
+playwright install
+```
+
+- `playwright` はブラウザ操作のために必要です。
+- Windows では通常、Playwright のブラウザは次のフォルダにインストールされます。
+  - `%LOCALAPPDATA%\ms-playwright`
+  - 例: `C:\Users\<ユーザー名>\AppData\Local\ms-playwright`
+- `.env` の `PLAYWRIGHT_BROWSERS_PATH` を指定すれば、そのパスを優先します。
+
+### 4. 配布先での配置
+- 実行ファイルを配布する場合、`.env` は `RakutenRoomAutoPost.exe` と同じ階層に置きます。
+- サービスアカウントJSONファイルも同じ階層に置くのが簡単です。
+- Playwright のブラウザは、配布先環境でも `%LOCALAPPDATA%\ms-playwright` にインストールされている必要があります。
+
+  配布先で Playwright ブラウザをインストールするには、同じように以下を実行します。
+
+  ```bash
+  playwright install
+  ```
+
+- `PLAYWRIGHT_BROWSERS_PATH` を環境変数や `.env` で明示的に指定している場合は、そのパスにブラウザファイルが必要です。
 
 ## ログ出力
 
@@ -118,8 +161,8 @@ python test.py
 - `playwright install` で必要なブラウザをインストール
 
 ### Google Sheets認証エラー
-- OAuth 2.0認証情報が正しく配置されているか確認
-- 古い `token.pickle` を削除して再認証
+- サービスアカウントJSONファイルが正しく配置されているか確認
+- `SERVICE_ACCOUNT_PATH` が `.env` に設定されているか確認
 
 ### ChatGPT エラー
 - OpenAI APIキーが正しいか確認
