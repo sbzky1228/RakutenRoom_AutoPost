@@ -145,14 +145,15 @@ class GoogleSheetsManager:
             # ヘッダー行から列インデックスを取得
             header = values[0]
             try:
+                item_url_col = header.index('ItemURL')
                 post_status_col = header.index('PostStatus')
                 posted_date_col = header.index('PostedDate')
             except ValueError:
-                print("✗ 必須列 'PostStatus' または 'PostedDate' が見つかりません")
+                print("✗ 必須列 'ItemURL', 'PostStatus' または 'PostedDate' が見つかりません")
                 return False
             
             for i, row in enumerate(values[1:], start=2):
-                if len(row) > 0 and row[0] == item_url:
+                if len(row) > item_url_col and row[item_url_col] == item_url:
                     # PostStatusとPostedDateの列を動的に決定して更新
                     update_range = f"{self.sheet_name}!{chr(65 + post_status_col)}{i}:{chr(65 + posted_date_col)}{i}"
                     update_body = {'values': [[status, posted_date]]}
