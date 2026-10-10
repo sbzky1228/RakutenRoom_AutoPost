@@ -59,6 +59,7 @@ SERVICE_ACCOUNT_PATH = _resolve_path_from_env(os.getenv('SERVICE_ACCOUNT_PATH', 
 
 # API情報
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-6.1-sol')  # 紹介文生成に使うモデル
 
 # Playwrightの設定
 # - PLAYWRIGHT_BROWSERS_PATH は .env または環境変数から読み取ります

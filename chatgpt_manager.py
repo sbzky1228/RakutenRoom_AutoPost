@@ -2,7 +2,7 @@
 ChatGPT マネージャー - ChatGPTを使用した紹介文生成
 """
 from openai import OpenAI
-from config import OPENAI_API_KEY
+from config import OPENAI_API_KEY, OPENAI_MODEL
 
 
 def generate_description(item_name: str) -> str:
@@ -61,18 +61,30 @@ def generate_description(item_name: str) -> str:
             "- 思わず共感してしまう、温かみのあるトーンで書く"
         )
 
+        # GPT-5/6系はmax_tokens/temperatureが使えず、推論トークンも出力枠を消費するため
+        # max_completion_tokensを広めに取り、推論量は最小限（low）にする
+        # （noneは一部モデル(gpt-6.1-sol等)で非対応のため、全モデルで使えるlowを使う）
+        params = {"max_completion_tokens": 2000}
+        if OPENAI_MODEL.startswith(("gpt-5", "gpt-6")):
+            params["reasoning_effort"] = "low"
+        else:
+            params["temperature"] = 0.7
+
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.7,
-            max_tokens=300,
+            **params,
         )
 
         content = response.choices[0].message.content
-        description = (content or "").strip()
+        # 行末の余分な空白（Markdown改行用のスペース等）を除去する
+        description = "\n".join(line.rstrip() for line in (content or "").strip().splitlines())
+        if not description:
+            print(f"✗ ChatGPTの応答が空でした (finish_reason={response.choices[0].finish_reason})")
+            return ""
         print(f"✓ 商品 '{item_name}' の紹介文を生成しました")
         return description
 
