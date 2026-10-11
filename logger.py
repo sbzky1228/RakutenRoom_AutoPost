@@ -3,12 +3,13 @@
 """
 import datetime
 import os
+from config import APP_DIR
 
 
 class Logger:
     """ログ出力を管理するクラス"""
     
-    def __init__(self, log_dir: str = 'logs'):
+    def __init__(self, log_dir: str = str(APP_DIR / 'logs')):
         self.log_dir = log_dir
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
@@ -47,7 +48,14 @@ class Logger:
     def error(self, message: str):
         """ERROR レベルでログ出力"""
         self.log(message, 'ERROR')
-    
-    def get_log_file(self) -> str:
-        """ログファイルのパスを取得"""
-        return self.log_file
+
+
+_shared_logger = None
+
+
+def get_logger() -> Logger:
+    """プログラム全体で共有するLoggerを取得する（初回呼び出し時に1つだけ作成し、同じログファイルに出力する）"""
+    global _shared_logger
+    if _shared_logger is None:
+        _shared_logger = Logger()
+    return _shared_logger

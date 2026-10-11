@@ -18,42 +18,6 @@ class GoogleSheetsManager:
         self.spreadsheet_id = SPREADSHEET_ID
         self.sheet_name = SHEET_NAME
     
-    def append_items(self, items: List[Dict]):
-        """商品情報を追加"""
-        try:
-            values = []
-            for item in items:
-                values.append([
-                    item.get('ItemURL', ''),
-                    item.get('ShopCode', ''),
-                    item.get('ItemID', ''),
-                    item.get('ItemCode', ''),
-                    item.get('ItemName', ''),
-                    item.get('CollectionName', ''),
-                    item.get('CollectionGenre', ''),
-                    item.get('PostStatus', ''),
-                    item.get('PostedDate', ''),
-                    item.get('CollectionStatus', ''),
-                    item.get('CollectedDate', '')
-                ])
-            
-            range_name = f"{self.sheet_name}!A2"
-            body = {'values': values}
-            
-            self.service.spreadsheets().values().append(
-                spreadsheetId=self.spreadsheet_id,
-                range=range_name,
-                valueInputOption='RAW',
-                body=body
-            ).execute()
-            
-            print(f"✓ {len(items)}件の商品情報をスプレッドシートに追加しました")
-        
-        except HttpError as e:
-            print(f"✗ スプレッドシートへの追加に失敗しました: {e}")
-        except Exception as e:
-            print(f"✗ スプレッドシートへの追加に失敗しました: {e}")
-    
     def _get_col_index_from_header(self, header):
         """ヘッダー行から列インデックスを取得"""
         col_index = {}
@@ -145,71 +109,45 @@ class GoogleSheetsManager:
             # ヘッダー行から列インデックスを取得
             header = values[0]
             try:
+                item_url_col = header.index('ItemURL')
                 post_status_col = header.index('PostStatus')
                 posted_date_col = header.index('PostedDate')
             except ValueError:
-                print("✗ 必須列 'PostStatus' または 'PostedDate' が見つかりません")
+                print("✗ 必須列 'ItemURL', 'PostStatus' または 'PostedDate' が見つかりません")
                 return False
             
-            for i, row in enumerate(values[1:], start=2):
-                if len(row) > 0 and row[0] == item_url:
-                    # PostStatusとPostedDateの列を動的に決定して更新
-                    update_range = f"{self.sheet_name}!{chr(65 + post_status_col)}{i}:{chr(65 + posted_date_col)}{i}"
-                    update_body = {'values': [[status, posted_date]]}
-                    
-                    self.service.spreadsheets().values().update(
-                        spreadsheetId=self.spreadsheet_id,
-                        range=update_range,
-                        valueInputOption='RAW',
-                        body=update_body
-                    ).execute()
-                    
-                    print(f"✓ 商品 {item_url} の投稿ステータスを '{status}' に更新しました")
-                    return True
-            
-            print(f"✗ ItemURL {item_url} が見つかりません")
-            return False
-        
-        except HttpError as e:
-            print(f"✗ ステータス更新に失敗しました: {e}")
-            return False
-        except Exception as e:
-            print(f"✗ ステータス更新に失敗しました: {e}")
-            return False
-    
-    def update_collection_status(self, item_code: str, collected_date: str):
-        """コレクション登録ステータスを更新"""
-        try:
-            range_name = f"{self.sheet_name}!A:K"
-            result = self.service.spreadsheets().values().get(
+            matched_rows = [
+                (i, row) for i, row in enumerate(values[1:], start=2)
+                if len(row) > item_url_col and row[item_url_col] == item_url
+            ]
+            # 同じURLの行が重複している場合は、投稿対象として取得された「未」の行を優先して更新する
+            unposted_rows = [
+                (i, row) for i, row in matched_rows
+                if len(row) > post_status_col and row[post_status_col] == '未'
+            ]
+            target_rows = unposted_rows or matched_rows
+            if not target_rows:
+                print(f"✗ ItemURL {item_url} が見つかりません")
+                return False
+
+            # PostStatusとPostedDateの列を動的に決定して更新
+            row_number = target_rows[0][0]
+            update_range = f"{self.sheet_name}!{chr(65 + post_status_col)}{row_number}:{chr(65 + posted_date_col)}{row_number}"
+            update_body = {'values': [[status, posted_date]]}
+
+            self.service.spreadsheets().values().update(
                 spreadsheetId=self.spreadsheet_id,
-                range=range_name
+                range=update_range,
+                valueInputOption='RAW',
+                body=update_body
             ).execute()
-            
-            values = result.get('values', [])
-            
-            for i, row in enumerate(values[1:], start=2):
-                if len(row) > 3 and row[3] == item_code:
-                    # I列（CollectionStatus）とJ列（CollectedDate）を更新
-                    update_range = f"{self.sheet_name}!I{i}:J{i}"
-                    update_body = {'values': [['済', collected_date]]}
-                    
-                    self.service.spreadsheets().values().update(
-                        spreadsheetId=self.spreadsheet_id,
-                        range=update_range,
-                        valueInputOption='RAW',
-                        body=update_body
-                    ).execute()
-                    
-                    print(f"✓ 商品 {item_code} のコレクション登録ステータスを更新しました")
-                    return True
-            
-            print(f"✗ 商品コード {item_code} が見つかりません")
-            return False
-        
+
+            print(f"✓ 商品 {item_url} の投稿ステータスを '{status}' に更新しました")
+            return True
+
         except HttpError as e:
-            print(f"✗ コレクション登録ステータス更新に失敗しました: {e}")
+            print(f"✗ ステータス更新に失敗しました: {e}")
             return False
         except Exception as e:
-            print(f"✗ コレクション登録ステータス更新に失敗しました: {e}")
+            print(f"✗ ステータス更新に失敗しました: {e}")
             return False

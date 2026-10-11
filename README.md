@@ -1,65 +1,51 @@
 # 楽天Room自動投稿プログラム - Playwright版
 
+## 概要
+
+Googleスプレッドシートに登録した楽天市場の商品を、ChatGPTで作成した紹介文付きで楽天ROOMに自動投稿するツールです。
+1回の実行で、PostStatusが「未」の商品を上から1件だけ投稿します（タスクスケジューラ等で定期実行する想定です）。
+
 ## プログラム構成
 
-このプログラムは、楽天市場のお気に入り商品情報を取得し、楽天ROOMに自動で投稿するためのツールです。
-
-### 主要モジュール
-
-#### 1. **config.py**
-- 環境変数の読み込みと設定管理
-- 楽天、Google Sheets、OpenAI のAPIキー
-- アプリケーション全体の定数設定
-
-#### 2. **browser_manager.py**
-- Playwrightを使用したブラウザ管理
-- ページ操作（遷移、待機など）
-- ブラウザのライフサイクル管理
-
-#### 3. **rakuten_login.py**
-- 楽天へのログイン処理
-- ログイン認証情報の入力
-
-#### 4. **google_sheets_utils.py**
-- Google Sheets APIへの接続とサービスオブジェクトの取得
-- サービスアカウント認証の管理
-
-#### 5. **google_sheets_manager.py**
-- Google Sheets APIの操作
-- 商品情報の読み書き
-- ステータス更新処理
-
-#### 6. **chatgpt_manager.py**
-- ChatGPT APIを使用した紹介文生成
-- OpenAIとの通信管理
-
-#### 7. **room_posting.py**
-- ROOMへの商品投稿処理
-- コレクションへの追加処理
-
-#### 8. **logger.py**
-- ログ出力管理
-- ログファイルの記録
-
-#### 9. **main.py**
-- メイン処理（各モジュールの統合）
-- 処理フロー全体の制御
+| ファイル | 役割 |
+|---|---|
+| `main.py` | メイン処理（各モジュールの統合、処理フロー全体の制御） |
+| `config.py` | `.env` の読み込みと設定値・定数の管理 |
+| `browser_manager.py` | Playwright（Chromium）の起動・終了、ログインセッションの保存（`user_data`）、パスキー要求のキャンセル |
+| `rakuten_login.py` | 楽天へのログイン判定・ログイン処理、ROOM投稿時の再認証 |
+| `google_sheets_utils.py` | Google Sheets APIへの接続（サービスアカウント認証） |
+| `google_sheets_manager.py` | 未投稿商品の取得、投稿ステータスの更新 |
+| `chatgpt_manager.py` | ChatGPT（OpenAI API）での紹介文生成 |
+| `room_posting.py` | 商品ページからROOMへの投稿処理 |
+| `logger.py` | ログ出力（コンソールとログファイル） |
+| `.env.example` | `.env`（設定ファイル）のひな形 |
 
 ### 処理フロー
 
 ```
-1. ブラウザ起動
-2. 楽天へのログイン
-3. お気に入り商品情報の取得
-4. Google Sheetsへの情報追加
-5. 未投稿商品の取得
-6. ChatGPTで紹介文生成
-7. 各商品をROOMに投稿
-   ├─ 投稿処理
-   ├─ Google Sheets更新
-   └─ コレクション追加
-8. ブラウザ終了
+1. スプレッドシートからPostStatusが「未」の商品を取得（先頭の1件を処理）
+2. ブラウザ起動（user_dataに保存されたログインセッションを読み込む）
+3. 楽天へのログイン
+   ├─ ログイン済み（セッションが有効）→ そのまま次へ
+   └─ 未ログイン → ID・パスワードでログイン（パスキーはキャンセルしてパスワードを使用）
+4. 商品ページを開く
+5. ChatGPTで紹介文を生成
+6. 「ROOMに投稿」ボタン（無い場合はシェアボタン経由）からROOMの投稿画面へ
+   └─ 再認証を求められた場合はパスワードで再認証
+7. 紹介文を入力して「完了」
+8. スプレッドシートを更新
+   ├─ 新規投稿 / すでにコレ済み → PostStatus「済」、PostedDateに実行日
+   └─ 失敗                       → PostStatus「不可」、PostedDateに実行日
+9. ブラウザ終了
 ```
+
+## 必要な環境
+
+- Windows
+- Python 3.10以上（開発・動作確認は Python 3.12）
+- 楽天会員アカウント（パスワードでログインできること）
+- Googleアカウント（Google Cloud のサービスアカウント、Googleスプレッドシート）
+- OpenAIアカウント（APIキー、クレジット残高）
 
 ## セットアップ手順
 
@@ -74,28 +60,65 @@ python -m venv venv
 # パッケージのインストール
 pip install -r requirements.txt
 
-# Playwrightの初期化
+# Playwrightのブラウザをインストール
 playwright install
 ```
 
 ### 2. .env ファイルの作成
-```
-RAKUTEN_USER_ID=your_user_id
-RAKUTEN_PASSWORD=your_password
-SPREADSHEET_ID=your_spreadsheet_id
-SHEET_NAME=Sheet1
-SERVICE_ACCOUNT_PATH=path/to/service_account.json
-OPENAI_API_KEY=your_openai_api_key
-PLAYWRIGHT_BROWSERS_PATH=path/to/ms-playwright
-```
+`.env.example` をコピーして `.env` という名前で保存し、各項目を書き換えます。
 
-- `PLAYWRIGHT_BROWSERS_PATH` は必要に応じて指定します。
-- 未指定の場合、実行ファイルでは `%LOCALAPPDATA%\ms-playwright` を自動検出します。
+| 項目 | 必須 | 内容 |
+|---|---|---|
+| `RAKUTEN_USER_ID` | ○ | 楽天会員のユーザーIDまたはメールアドレス |
+| `RAKUTEN_PASSWORD` | ○ | 楽天会員のパスワード |
+| `SPREADSHEET_ID` | ○ | スプレッドシートのID（URLの `/d/` と `/edit` の間） |
+| `SHEET_NAME` | | シート名（省略時は `Sheet1`） |
+| `SERVICE_ACCOUNT_PATH` | ○ | サービスアカウントのJSONキーのパス（相対パスは `.env` のあるフォルダ基準） |
+| `OPENAI_API_KEY` | ○ | OpenAIのAPIキー |
+| `OPENAI_MODEL` | | 紹介文の生成に使うモデル（省略時は `gpt-6.1-sol`） |
+| `PLAYWRIGHT_BROWSERS_PATH` | | Playwrightのブラウザのインストール先（通常は指定不要） |
+
+> **Windowsのパスはシングルクォートで囲んでください。**
+> ダブルクォートで囲むと `\r` や `\n` が改行文字として解釈され、パスが壊れます（例: `...\rakuten.json` の `\r`）。
+> ダブルクォートを使う場合は `\\` と重ねるか、`/` 区切りで書いてください。
+> ```
+> SERVICE_ACCOUNT_PATH='C:\Users\you\service_account.json'   ← OK
+> SERVICE_ACCOUNT_PATH="C:\Users\you\service_account.json"   ← NG
+> ```
 
 ### 3. Google認証の設定
-- Google Cloud Consoleでサービスアカウントを作成
-- サービスアカウントのJSONキーをダウンロード
-- ダウンロードしたJSONファイルのパスを `SERVICE_ACCOUNT_PATH` に設定
+1. Google Cloud Console でプロジェクトを作成し、Google Sheets API を有効にする
+2. サービスアカウントを作成し、JSONキーをダウンロードする
+3. ダウンロードしたJSONファイルのパスを `.env` の `SERVICE_ACCOUNT_PATH` に設定する
+4. 対象のスプレッドシートを、サービスアカウントのメールアドレス（JSON内の `client_email`）に「編集者」として共有する
+
+### 4. スプレッドシートの準備
+1行目に以下の見出しを設定し、2行目以降に商品を登録します。
+見出しはすべて必須です。A〜K列の範囲内であれば列の順番は問いませんが、見出し名は完全一致させてください。
+
+| 見出し | 内容 |
+|---|---|
+| `ItemURL` | 楽天市場の商品ページのURL |
+| `ShopCode` | ショップコード |
+| `ItemID` | 商品ID |
+| `ItemCode` | 商品コード（`ショップコード:商品ID`） |
+| `ItemName` | 商品名（ChatGPTへの紹介文作成依頼に使用） |
+| `CollectionName` | コレクション名 |
+| `CollectionGenre` | コレクションのジャンル |
+| `PostStatus` | 投稿ステータス（下表） |
+| `PostedDate` | 投稿日（プログラムが記入） |
+| `CollectionStatus` | コレクション登録ステータス |
+| `CollectedDate` | コレクション登録日 |
+
+`PostStatus` の値:
+
+| 値 | 意味 |
+|---|---|
+| `未` | 未投稿（投稿対象）。新しく登録する商品はこの値にする |
+| `済` | ROOMに登録済み（新規投稿した、またはすでにコレ済みだった） |
+| `不可` | 投稿に失敗した（投稿対象から外れる。再投稿したい場合は `未` に戻す） |
+
+- 同じ `ItemURL` の行が複数ある場合は、`未` の行のステータスを更新します。
 
 ## 実行方法
 
@@ -104,82 +127,190 @@ PLAYWRIGHT_BROWSERS_PATH=path/to/ms-playwright
 python main.py
 ```
 
-> 現在、未投稿商品のうち最初の1件のみ処理します。
+- 実行するとブラウザ（Chromium）の画面が開き、自動で操作されます。操作中は画面に触れないでください。
+- 1回の実行で、未投稿商品のうち先頭の1件のみ処理します。
 
-## 実行ファイルの作成
+### ログインとセッションの保存（user_data）
+- ログイン状態は `user_data` フォルダに保存され、2回目以降の実行ではID・パスワードの入力を省略します。
+  - `python main.py` 実行時: プロジェクト直下の `user_data`
+  - `.exe` 実行時: `RakutenRoomAutoPost.exe` と同じフォルダの `user_data`
+- 初回（`user_data` が無い・中身を削除した）や、セッションが切れている場合は自動でログインします。
+  - 楽天からパスキー認証を求められますが、自動でキャンセルしてパスワードでログインします（パスキーのQRコードは表示されません）。
+- ROOMへの投稿時に楽天から再認証を求められることがありますが、自動でパスワードを入力して続行します。
+- ログイン状態をリセットしたい場合は `user_data` フォルダを削除してください。
+- `user_data` にはログイン情報（Cookie）が含まれるため、他人に渡したりGitにコミットしたりしないでください（`.gitignore` で除外済み）。
+
+### すでにコレ済みの商品
+- 以前にROOMへ投稿（コレ！）済みの商品は、ROOMに「すでにコレ！している商品です」と表示され、新たに投稿できません。
+- この場合は新規投稿をせず、投稿済みとしてスプレッドシートを「済」に更新します。
+- 新規投稿か、すでにコレ済みだったかはログファイルで確認できます（[ログ出力](#ログ出力) 参照）。
+
+## 実行ファイル（.exe）の作成
+
+Pythonが入っていないパソコンでも動かせるように、プログラムを1つの実行ファイル（`RakutenRoomAutoPost.exe`）にまとめます。
+タスクスケジューラで毎日自動実行する場合も、この実行ファイルを使います。
+
+> **コードを修正したときは、必ず実行ファイルを作り直してください。** 作り直さないと、修正は実行ファイルに反映されません。
 
 ### 1. 実行ファイルを作成する手順
-```bash
+
+**事前準備**: 「[セットアップ手順](#セットアップ手順)」の「1. 環境構築」を済ませ、`python main.py` で動くことを確認しておいてください。
+
+**手順1. プロジェクトのフォルダでターミナルを開く**
+
+エクスプローラーでプロジェクトのフォルダ（`main.py` があるフォルダ）を開き、フォルダ内の何もないところを右クリックして「ターミナルで開く」を選びます。
+（表示されない場合は「その他のオプションを確認」→「ターミナルで開く」、または PowerShell を起動して `cd` でフォルダに移動します。）
+
+```powershell
+cd "C:\path\to\RakutenRoom_AutoPost"
+```
+
+**手順2. 仮想環境を有効にする**（仮想環境を作っている場合）
+
+```powershell
+.\venv\Scripts\activate
+```
+
+行の先頭に `(venv)` と表示されれば有効になっています。
+
+**手順3. PyInstaller をインストールする**（初回のみ）
+
+実行ファイルの作成には PyInstaller というツールを使います（`requirements.txt` には含まれていないため、別途インストールします）。
+
+```powershell
+pip install pyinstaller
+```
+
+**手順4. 実行ファイルを作成する**
+
+```powershell
 pyinstaller --onefile --name RakutenRoomAutoPost main.py
 ```
 
-- `--onefile` を付けると `dist\RakutenRoomAutoPost.exe` が生成されます。
-- `--onefile` を付けない場合は `dist\RakutenRoomAutoPost\` フォルダに実行ファイルと依存ファイルが出力されます。
+- 1〜2分ほどかかります。最後に `Build complete!` と表示されれば成功です。
+- 2回目以降（作り直す場合）は、1回目に作られた設定ファイル（`RakutenRoomAutoPost.spec`）を使って次のコマンドでも作成できます。
+  ```powershell
+  pyinstaller --noconfirm RakutenRoomAutoPost.spec
+  ```
+- 作り直すときは、実行中の `RakutenRoomAutoPost.exe` を終了してから実行してください（実行中は上書きできません）。
+
+**手順5. できあがったファイルを確認する**
+
+```
+RakutenRoom_AutoPost\
+├─ dist\
+│   └─ RakutenRoomAutoPost.exe   … できあがった実行ファイル
+├─ build\                        … 作成時の作業フォルダ（削除してもよい）
+└─ RakutenRoomAutoPost.spec       … 作成時の設定ファイル（作り直しで使う）
+```
+
+**手順6. 必要なファイルを配置して試しに実行する**
+
+1. 「[2. 実行時に必要な外部ファイル](#2-実行時に必要な外部ファイル)」のとおり、`dist` フォルダに `.env` などを配置します。
+2. `RakutenRoomAutoPost.exe` をダブルクリックして実行します。
+   - 黒い画面（コンソール）とブラウザが開き、自動で処理が進みます。処理が終わると自動で閉じます。
+   - **実際に1件、ROOMへの投稿が行われ、スプレッドシートも更新されます。**
+3. `dist\logs` フォルダにできたログファイルを開き、`楽天Room自動投稿プログラムが完了しました` と記録されていること、`[ERROR]` が無いことを確認します。
 
 ### 2. 実行時に必要な外部ファイル
-実行ファイルと同じ階層に `.env` を配置してください。`config.py` は実行ファイルのあるフォルダの `.env` を探して読み込みます。
+実行ファイルと同じフォルダに `.env` を配置してください。`config.py` は実行ファイルのあるフォルダの `.env` を探して読み込みます。
 
-- `dist\RakutenRoomAutoPost.exe`
-- `dist\.env`
-- サービスアカウントJSONファイル（`SERVICE_ACCOUNT_PATH` で指定）
+```
+dist\
+├─ RakutenRoomAutoPost.exe
+├─ .env                    … .env.example をコピーして作成
+├─ service_account.json    … SERVICE_ACCOUNT_PATH で指定（同じフォルダに置くのが簡単）
+├─ user_data\              … 初回実行時に自動作成（ログインセッション）
+└─ logs\                   … 実行時に自動作成（ログファイル）
+```
 
 ### 3. Playwright のブラウザが必要
-実行ファイルでも `playwright` のブラウザがインストールされている必要があります。生成前に以下を実行してください。
+実行ファイルでも Playwright のブラウザがインストールされている必要があります。
 
 ```bash
 playwright install
 ```
 
-- `playwright` はブラウザ操作のために必要です。
-- Windows では通常、Playwright のブラウザは次のフォルダにインストールされます。
-  - `%LOCALAPPDATA%\ms-playwright`
-  - 例: `C:\Users\<ユーザー名>\AppData\Local\ms-playwright`
-- `.env` の `PLAYWRIGHT_BROWSERS_PATH` を指定すれば、そのパスを優先します。
+- Windows では通常、次のフォルダにインストールされ、実行ファイルはこのフォルダを自動で使用します。
+  - `%LOCALAPPDATA%\ms-playwright`（例: `C:\Users\<ユーザー名>\AppData\Local\ms-playwright`）
+- `.env` の `PLAYWRIGHT_BROWSERS_PATH` を指定した場合は、そのパスを優先します。
 
-### 4. 配布先での配置
-- 実行ファイルを配布する場合、`.env` は `RakutenRoomAutoPost.exe` と同じ階層に置きます。
-- サービスアカウントJSONファイルも同じ階層に置くのが簡単です。
-- Playwright のブラウザは、配布先環境でも `%LOCALAPPDATA%\ms-playwright` にインストールされている必要があります。
+### 4. タスクスケジューラで定期実行する場合
+- 「操作」の「プログラム/スクリプト」に `RakutenRoomAutoPost.exe` のフルパスを指定します。
+- 「開始（オプション）」は空欄のままで構いません。ログ（`logs`）とログインセッション（`user_data`）は、設定にかかわらず常に `RakutenRoomAutoPost.exe` と同じフォルダに作成されます。
+- ブラウザの画面を表示して操作するため、「ユーザーがログオンしているときのみ実行する」を選択してください。
 
-  配布先で Playwright ブラウザをインストールするには、同じように以下を実行します。
-
-  ```bash
-  playwright install
-  ```
-
-- `PLAYWRIGHT_BROWSERS_PATH` を環境変数や `.env` で明示的に指定している場合は、そのパスにブラウザファイルが必要です。
+### 5. 配布先での配置
+- 上記「2. 実行時に必要な外部ファイル」の構成で配置します。
+- 配布先の環境でも `playwright install` でブラウザをインストールしてください。
+  - 実行ファイルに含まれる Playwright（1.40.0）に対応したブラウザが必要です。開発環境と同じバージョンの Playwright でインストールしてください。
 
 ## ログ出力
 
-ログファイルは `logs/` ディレクトリに以下のフォーマットで保存されます：
-- ファイル名: `rakuten_room_YYYYMMDD_HHMMSS.log`
+ログファイルは `logs\` フォルダに保存されます。
+- `.exe` 実行時: `RakutenRoomAutoPost.exe` と同じフォルダの `logs\`（例: `dist\logs\`）
+- `python main.py` 実行時: プロジェクト直下の `logs\`
+- 実行時の作業フォルダ（どこから起動したか）には左右されません。
+- ファイル名: `rakuten_room_YYYYMMDD_HHMMSS.log`（1回の実行につき1ファイル）
+- ログイン処理（セッションの利用、ID・パスワード入力、パスキーのキャンセル、再認証）の経過と失敗理由も記録されます。
+
+投稿結果は次のように記録されます。
+
+```
+[INFO] 投稿結果: 新規投稿
+[INFO] 【新規投稿】ROOMに新しく投稿しました: 〇〇
+
+[INFO] 投稿結果: すでにコレ済み
+[INFO] 【すでにコレ済み】ROOMに投稿済みの商品のため、新規投稿はしていません: 〇〇
+
+[INFO] 投稿結果: 失敗
+[WARNING] 【失敗】投稿に失敗しました: 〇〇
+```
 
 ## トラブルシューティング
 
-### ブラウザ接続エラー
-- Playwrightが正しくインストールされているか確認
-- `playwright install` で必要なブラウザをインストール
+### 楽天へのログインに失敗する
+- ログファイルの `[ERROR]` の行で原因を確認してください。
+- 「パスワードを送信しましたがログインできませんでした」「ユーザーIDを送信しましたが次の画面に進めませんでした」
+  - `.env` の `RAKUTEN_USER_ID`・`RAKUTEN_PASSWORD` が正しいか確認してください。
+  - アカウントロックを防ぐため、ID・パスワードの送信は1回のログイン処理につき1回だけ行い、失敗しても再送信しません。
+- 改善しない場合は `user_data` フォルダを削除してから再実行してください（ログインし直します）。
 
-### Google Sheets認証エラー
-- サービスアカウントJSONファイルが正しく配置されているか確認
-- `SERVICE_ACCOUNT_PATH` が `.env` に設定されているか確認
+### スプレッドシートに接続できない
+- `SERVICE_ACCOUNT_PATH` のJSONファイルが存在するか確認してください。
+- エラーに `Invalid argument` と出てパスが崩れている場合は、`.env` のパスをシングルクォートで囲んでください（[.env ファイルの作成](#2-env-ファイルの作成) 参照）。
+- スプレッドシートがサービスアカウントのメールアドレスに共有されているか確認してください。
 
-### ChatGPT エラー
-- OpenAI APIキーが正しいか確認
-- APIアカウントのクォータ確認
+### 投稿に失敗する（PostStatusが「不可」になる）
+- ログファイルの `[ERROR]` の行で失敗した箇所を確認してください。
+- 商品ページが削除・販売終了になっていないか確認してください。
+- 再投稿したい場合は、スプレッドシートの `PostStatus` を `未` に戻してください。
 
-## 必要な環境
+### ブラウザが起動しない
+- `playwright install` でブラウザをインストールしてください。
 
-- Python 3.8以上
-- Google Sheetsアカウント
-- OpenAIアカウント
-- 楽天市場アカウント
+### ChatGPTで紹介文が生成されない
+- OpenAIのAPIキーが正しいか、クレジット残高が残っているか確認してください（残高が0だと生成に失敗します）。
+- `OPENAI_MODEL` を指定している場合は、モデル名が正しいか確認してください。
 
 ## ライセンス
 
 このプログラムは個人使用を想定しています。
 
 ## 更新履歴
+
+### v2.1 (2026-10-10)
+- 紹介文の生成モデルを `gpt-6.1-sol` に変更し、`.env` の `OPENAI_MODEL` で切り替え可能に
+- ログインセッションを `user_data` に保存し、2回目以降のログインを省略
+- パスキー認証を回避してパスワードでログインするよう対応
+- ROOM投稿時の再認証に対応
+- 「すでにコレ済み」の商品を投稿済みとして扱い、新規投稿と区別してログに記録
+- ログイン・投稿の失敗理由をログファイルに記録
+- ログ（`logs`）の保存先を実行ファイルと同じフォルダに固定（タスクスケジューラの「開始」設定が不要に）
+- ログイン失敗時にID・パスワードを再送信しないよう変更（アカウントロック防止）
+- 同じURLの行が重複している場合は「未」の行を更新するよう修正
+- `.env.example`（設定ファイルのひな形）を追加
+- 未使用のコード・ファイル・依存パッケージを削除
 
 ### v2.0 (2024-02-08)
 - Seleniumから Playwrightへ移行

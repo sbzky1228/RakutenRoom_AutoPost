@@ -7,6 +7,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+# プログラムのフォルダ（user_data・logsの保存先）
+# - .exe実行時: RakutenRoomAutoPost.exe と同じフォルダ
+# - python main.py 実行時: このファイルのあるフォルダ（プロジェクト直下）
+# 実行時の作業フォルダ（タスクスケジューラの「開始」設定など）に左右されないよう固定する
+APP_DIR = (
+    Path(sys.executable).resolve().parent
+    if getattr(sys, 'frozen', False)
+    else Path(__file__).resolve().parent
+)
+
+
 def _resolve_env_path() -> Path | None:
     candidates = []
     if getattr(sys, 'frozen', False):
@@ -59,12 +70,12 @@ SERVICE_ACCOUNT_PATH = _resolve_path_from_env(os.getenv('SERVICE_ACCOUNT_PATH', 
 
 # API情報
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-6.1-sol')  # 紹介文生成に使うモデル
 
 # Playwrightの設定
 # - PLAYWRIGHT_BROWSERS_PATH は .env または環境変数から読み取ります
 # - 実行ファイル起動時に未指定の場合は、Windowsの既定パス (%LOCALAPPDATA%\ms-playwright) を自動検出します
 PLAYWRIGHT_BROWSERS_PATH = _resolve_path_from_env(os.getenv('PLAYWRIGHT_BROWSERS_PATH', ''), ENV_DIR)
-CHROMIUM_EXECUTABLE_PATH = _resolve_path_from_env(os.getenv('CHROMIUM_EXECUTABLE_PATH', ''), ENV_DIR)
 
 if not PLAYWRIGHT_BROWSERS_PATH and getattr(sys, 'frozen', False):
     default_playwright = Path(os.path.expanduser('~')) / 'AppData' / 'Local' / 'ms-playwright'
@@ -76,12 +87,10 @@ if PLAYWRIGHT_BROWSERS_PATH:
 
 HEADLESS_MODE = False    # ヘッドレスモード
 BROWSER_TIMEOUT = 60000  # タイムアウト（ミリ秒）
-PAGE_LOAD_TIMEOUT = 10000  # ページロード待機時間
 NAVIGATION_TIMEOUT = 60000  # ナビゲーション待機時間
 
 # Google Sheets APIスコープ
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
-# Rakuten Room / Ichiba URLs
-RAKUTEN_ROOM_BASE_URL = "https://room.rakuten.co.jp"
-RAKUTEN_ICHIBA_BASE_URL = "https://www.rakuten.co.jp"
+# 楽天のURL
+RAKUTEN_MY_URL = "https://my.rakuten.co.jp/"  # ログイン状態の判定に使う会員ページ
