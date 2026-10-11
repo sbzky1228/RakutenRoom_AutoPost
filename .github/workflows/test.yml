@@ -1,0 +1,42 @@
+# テストの自動実行
+# - 実際の楽天・Google・OpenAI にはアクセスしない（偽のサイト・偽のAPIでテストする）ため、Secrets の設定は不要
+# - 本番（exe）と同じ Windows で実行する
+name: テスト
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:  # Actions 画面から手動で実行できるようにする
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"  # ログの「✓」等を出力できるようにする
+
+    steps:
+      - name: コードを取得
+        uses: actions/checkout@v4
+
+      - name: Python をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: パッケージをインストール
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Playwright のブラウザ（Chromium）をインストール
+        run: python -m playwright install chromium
+
+      - name: 静的チェック（pyflakes）
+        shell: bash
+        run: python -m pyflakes $(git ls-files '*.py')
+
+      - name: テストを実行
+        run: python -m pytest -v

@@ -267,6 +267,29 @@ playwright install
 [WARNING] 【失敗】投稿に失敗しました: 〇〇
 ```
 
+## テスト
+
+`tests\` フォルダに自動テストがあります。
+**テストは実際の楽天・Google・OpenAIには一切アクセスしません。** 楽天の画面（ログイン・パスキー・再認証・ROOM投稿・すでにコレ済み）は偽のページで再現し、スプレッドシートとChatGPTは偽物に置き換えて、本番のコードをそのまま動かします。テストでROOMに投稿されたり、楽天アカウントがロックされたりすることはありません。
+
+### 手元で実行する
+```powershell
+# テスト用のパッケージをインストール（初回のみ）
+pip install -r requirements-dev.txt
+playwright install chromium
+
+# テストを実行（2分ほどかかります）
+python -m pytest -v
+```
+
+最後に `27 passed` のように表示され、`failed` が無ければ成功です。
+
+### GitHub Actions（自動実行）
+- GitHub にプッシュ（push）したときと、プルリクエストを作成・更新したときに、自動でテストが実行されます（設定: `.github/workflows/test.yml`）。
+- 結果は GitHub のリポジトリの「Actions」タブで確認できます。緑のチェック（✓）が成功、赤のバツ（✗）が失敗です。
+- 「Actions」タブで「テスト」→「Run workflow」を押すと、手動でも実行できます。
+- Secrets（パスワードやAPIキー）の設定は不要です。
+
 ## トラブルシューティング
 
 ### 楽天へのログインに失敗する
@@ -298,6 +321,9 @@ playwright install
 このプログラムは個人使用を想定しています。
 
 ## 更新履歴
+
+### v2.2 (2026-10-12)
+- 自動テスト（`tests\`）を追加し、GitHub Actions でプッシュ時に自動実行するよう設定
 
 ### v2.1 (2026-10-10)
 - 紹介文の生成モデルを `gpt-6.1-sol` に変更し、`.env` の `OPENAI_MODEL` で切り替え可能に
