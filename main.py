@@ -8,13 +8,13 @@ from rakuten_login import login_to_rakuten
 from google_sheets_manager import GoogleSheetsManager
 from google_sheets_utils import connect_to_sheets_and_get_existing_codes
 from chatgpt_manager import generate_description
-from room_posting import post_item_to_room
-from logger import Logger
+from room_posting import PostResult, post_item_to_room
+from logger import get_logger
 
 
 async def main():
     """メイン処理"""
-    logger = Logger()
+    logger = get_logger()
     browser_manager = None
 
     try:
@@ -66,7 +66,6 @@ async def main():
         # 1件だけ処理
         item_url = item.get('ItemURL', '')
         item_name = item.get('ItemName', '')
-        shop_code = item.get('ShopCode', '')
 
         if not item_url or not item_name:
             logger.warning(f"必要な情報が不足しているため、処理を中止します: {item_name}")
@@ -75,8 +74,13 @@ async def main():
         logger.info(f"商品を処理しています: {item_name}")
 
         # 商品ページを開く
-        await page.goto(item_url)
-        await page.wait_for_load_state('load')
+        # 商品ページは広告等の読み込みが重く'load'まで60秒を超えることがあるため、
+        # DOMの読み込み完了で先に進み、'load'は待てる範囲で待つ
+        await page.goto(item_url, wait_until='domcontentloaded')
+        try:
+            await page.wait_for_load_state('load', timeout=30000)
+        except Exception:
+            logger.info("商品ページの全リソース読み込みを待たずに処理を続行します")
 
         # ChatGPTで紹介文を生成
         logger.info(f"ChatGPTで紹介文を生成しています: {item_name}")
@@ -88,14 +92,19 @@ async def main():
 
         # ROOMに投稿
         logger.info(f"ROOMに投稿しています: {item_name}")
-        success = await post_item_to_room(page, description, shop_code)
+        result = await post_item_to_room(page, description)
+        logger.info(f"投稿結果: {result.value}")
 
-        if success:
-            logger.info(f"投稿に成功しました: {item_name}")
-            # 投稿完了の場合はスプレッドシートのPostStatusを「済」、PostedDateを投稿日で更新する
+        if result is PostResult.POSTED:
+            logger.info(f"【新規投稿】ROOMに新しく投稿しました: {item_name}")
+        elif result is PostResult.ALREADY_COLLECTED:
+            logger.info(f"【すでにコレ済み】ROOMに投稿済みの商品のため、新規投稿はしていません: {item_name}")
+
+        if result.is_success:
+            # 新規投稿・すでにコレ済みの場合はスプレッドシートのPostStatusを「済」、PostedDateを投稿日で更新する
             sheets_manager.update_post_status_by_url(item_url, '済', posted_date)
         else:
-            logger.warning(f"投稿に失敗しました: {item_name}")
+            logger.warning(f"【失敗】投稿に失敗しました: {item_name}")
             # 投稿失敗の場合はスプレッドシートのPostStatusを「不可」、PostedDateを投稿日で更新する
             sheets_manager.update_post_status_by_url(item_url, '不可', posted_date)
 

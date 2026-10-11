@@ -1,8 +1,21 @@
 """ブラウザ管理モジュール - Playwrightを使用したブラウザ操作"""
-import sys
-from pathlib import Path
-from playwright.async_api import async_playwright, BrowserContext, Page
-from config import HEADLESS_MODE, BROWSER_TIMEOUT, NAVIGATION_TIMEOUT
+from playwright.async_api import async_playwright, Page
+from config import APP_DIR, HEADLESS_MODE, BROWSER_TIMEOUT, NAVIGATION_TIMEOUT
+
+# パスキー（publicKey）のnavigator.credentials.getを、ユーザーがキャンセルした時と同じ
+# NotAllowedErrorで失敗させる。保存済みパスワードの照会（publicKeyなし）はそのまま通す。
+CANCEL_PASSKEY_SCRIPT = """
+(() => {
+  if (!navigator.credentials || !navigator.credentials.get) return;
+  const originalGet = navigator.credentials.get.bind(navigator.credentials);
+  navigator.credentials.get = (options) => {
+    if (options && options.publicKey) {
+      return Promise.reject(new DOMException('Passkey was cancelled by automation.', 'NotAllowedError'));
+    }
+    return originalGet(options);
+  };
+})();
+"""
 
 class BrowserManager:
     """Playwrightを使用したブラウザ実装を管理するクラス"""
@@ -25,12 +38,7 @@ class BrowserManager:
         self.playwright = await async_playwright().start()
         
         # .pyはプロジェクト直下、.exeはEXEと同じフォルダに保存する
-        base_dir = (
-            Path(sys.executable).resolve().parent
-            if getattr(sys, "frozen", False)
-            else Path(__file__).resolve().parent
-        )
-        user_data_dir = base_dir / "user_data"
+        user_data_dir = APP_DIR / "user_data"
         user_data_dir.mkdir(parents=True, exist_ok=True)
         print(f"Chromiumのユーザーデータ保存先: {user_data_dir}")
         
@@ -51,6 +59,10 @@ class BrowserManager:
             viewport={"width": 1280, "height": 800}
         )
         
+        # パスキー（WebAuthn）要求を即座にキャンセル扱いにする
+        # これによりChromeのパスキーQRダイアログを出さず、パスワードログインに切り替えられる
+        await self.context.add_init_script(CANCEL_PASSKEY_SCRIPT)
+
         # 起動時に自動生成されたページを取得（無ければ新規作成）
         self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
         
