@@ -15,7 +15,8 @@ import rakuten_login
 from rakuten_login import complete_login_form, login_to_rakuten
 from room_posting import PostResult, is_already_collected, post_item_to_room
 from tests.fake_rakuten import (
-    COLLECT_PAGE, ITEM_CODE, ITEM_URL, MY_RAKUTEN_URL, FakeRakutenState, fake_rakuten_browser,
+    COLLECT_PAGE, ITEM_CODE, ITEM_URL, KOBO_ITEM_CODE, KOBO_ITEM_URL, MY_RAKUTEN_URL,
+    FakeRakutenState, fake_rakuten_browser,
 )
 
 
@@ -139,11 +140,11 @@ def test_login_form_without_credentials_does_nothing(monkeypatch, log_to_tmp):
 # ROOM投稿
 # ---------------------------------------------------------------------------
 
-def post_scenario(state: FakeRakutenState, description="テストの紹介文です。"):
+def post_scenario(state: FakeRakutenState, description="テストの紹介文です。", item_url=ITEM_URL, item_code=""):
     async def scenario():
         async with fake_rakuten_browser(state) as page:
-            await page.goto(ITEM_URL, wait_until="domcontentloaded")
-            return await post_item_to_room(page, description)
+            await page.goto(item_url, wait_until="domcontentloaded")
+            return await post_item_to_room(page, description, item_code)
     return asyncio.run(scenario())
 
 
@@ -169,6 +170,41 @@ def test_post_with_reauthentication(credentials, log_to_tmp):
     assert "ROOMへの投稿前に再認証を求められたため、ログインします" in log
     assert "再認証の確認画面で「次へ」をクリックしました" in log
     assert "パスキー認証をキャンセルし、パスワードでのログインに切り替えます" in log
+
+
+def test_post_kobo_item_via_share_menu_link(credentials):
+    # 楽天Koboは「ROOMに投稿」ボタンが無く、閉じたシェアメニュー内の「ROOMに投稿する」リンクから投稿する
+    state = FakeRakutenState(logged_in=True)
+    assert post_scenario(state, "Koboの紹介文", item_url=KOBO_ITEM_URL) is PostResult.POSTED
+    assert state.posts == ["Koboの紹介文"]
+
+
+def test_post_kobo_item_already_collected(credentials):
+    state = FakeRakutenState(logged_in=True, collected={KOBO_ITEM_CODE})
+    assert post_scenario(state, item_url=KOBO_ITEM_URL) is PostResult.ALREADY_COLLECTED
+    assert state.posts == []
+
+
+def test_post_kobo_item_with_reauthentication(credentials, log_to_tmp):
+    state = FakeRakutenState(logged_in=True, require_reauth=True)
+    assert post_scenario(state, "再認証後のKobo紹介文", item_url=KOBO_ITEM_URL) is PostResult.POSTED
+    assert state.posts == ["再認証後のKobo紹介文"]
+    assert "ROOMへの投稿前に再認証を求められたため、ログインします" in read_log(log_to_tmp)
+
+
+def test_post_kobo_item_falls_back_to_item_code(credentials):
+    # シェアメニューにROOM投稿リンクが無くても、ItemCodeからROOMの投稿画面を開いて投稿する
+    state = FakeRakutenState(logged_in=True, kobo_room_link=False)
+    result = post_scenario(state, "ItemCodeからの紹介文", item_url=KOBO_ITEM_URL, item_code=KOBO_ITEM_CODE)
+    assert result is PostResult.POSTED
+    assert state.posts == ["ItemCodeからの紹介文"]
+
+
+def test_post_fails_without_room_link_or_item_code(credentials, log_to_tmp):
+    state = FakeRakutenState(logged_in=True, kobo_room_link=False)
+    assert post_scenario(state, item_url=KOBO_ITEM_URL) is PostResult.FAILED
+    assert state.posts == []
+    assert "[ERROR] ROOMの投稿画面を開けませんでした" in read_log(log_to_tmp)
 
 
 @pytest.mark.parametrize("already", [True, False])

@@ -25,6 +25,9 @@ CORRECT_PASSWORD = "correct-password"
 MY_RAKUTEN_URL = "https://my.rakuten.co.jp/"
 ITEM_URL = "https://item.rakuten.co.jp/test-shop/test-item/"
 ITEM_CODE = "test-shop:test-item"
+# 楽天Kobo（ShopID 213310）の商品ページ。「ROOMに投稿」ボタンが無く、シェアボタンのメニューから投稿する
+KOBO_ITEM_URL = "https://books.rakuten.co.jp/rk/test-kobo-item/"
+KOBO_ITEM_CODE = "rakutenkobo-ebooks:test-kobo-item"
 
 
 @dataclass
@@ -33,6 +36,7 @@ class FakeRakutenState:
     logged_in: bool = False             # my Rakutenでログイン済みとして表示するか
     require_reauth: bool = False        # ROOM投稿時に再認証（/session/upgrade）を求めるか
     collected: set = field(default_factory=set)   # すでにコレ済みの商品コード
+    kobo_room_link: bool = True         # Koboの商品ページにROOM投稿リンクを置くか（Falseならシェアメニューに無い）
     login_page_hits: int = 0            # ログイン画面が表示された回数
     posts: list = field(default_factory=list)     # ROOMに投稿された内容
 
@@ -104,6 +108,25 @@ ITEM_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>テスト
 <a aria-label="ROOMに投稿" href="https://room.rakuten.co.jp/mix?itemcode=__ITEM_CODE__" target="_self">ROOMに投稿</a>
 </body></html>"""
 
+# 楽天Koboの商品ページ: シェアボタンを押すとメニューが開き、「ROOMに投稿する」が新しいタブでROOMを開く。
+# 閉じたメニューは opacity:0 で隠れている（Playwrightでは「表示中」と判定されるがクリックできない）
+KOBO_ITEM_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>テスト電子書籍</title>
+<style>
+.snsShare{position:relative}
+.snsShare__menu{position:absolute;top:30px;left:0;opacity:0;pointer-events:none}
+.snsShare.is-open .snsShare__menu{opacity:1;pointer-events:auto}
+</style></head>
+<body><h1>テスト電子書籍</h1>
+<div class="snsShare"><button class="snsShare__button" type="button">シェア</button>
+<ul class="snsShare__menu"><li><a class="item__x" href="#">Xでポスト</a></li>__ROOM_LINK__</ul></div>
+<script>
+document.querySelector('.snsShare__button').onclick = () =>
+  document.querySelector('.snsShare').classList.toggle('is-open');
+</script></body></html>"""
+
+KOBO_ROOM_LINK = ('<li><a class="item__room" data-ratid="item_share_room" target="_blank" '
+                  'href="https://room.rakuten.co.jp/mix?itemcode=__ITEM_CODE__&scid=we_kobo">ROOMに投稿する</a></li>')
+
 COLLECT_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>ROOM</title>
 <style>#dialog{position:fixed;inset:0;background:rgba(0,0,0,.5)}</style></head>
 <body><p>コレ！して投稿する</p><div class="item-name">テスト商品</div>
@@ -164,6 +187,11 @@ async def _handle(route, state: FakeRakutenState):
         return await _html(route, MY_RAKUTEN_PAGE
                            .replace("__LOGGED_IN__", "true" if state.logged_in else "false")
                            .replace("__LOGIN_URL__", _login_url(MY_RAKUTEN_URL)))
+
+    if host == "books.rakuten.co.jp":
+        room_link = KOBO_ROOM_LINK if state.kobo_room_link else ""
+        return await _html(route, KOBO_ITEM_PAGE.replace("__ROOM_LINK__", room_link)
+                           .replace("__ITEM_CODE__", quote(KOBO_ITEM_CODE, safe="")))
 
     if host == "item.rakuten.co.jp":
         return await _html(route, ITEM_PAGE.replace("__ITEM_CODE__", quote(ITEM_CODE, safe="")))

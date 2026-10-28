@@ -66,6 +66,7 @@ async def main():
         # 1件だけ処理
         item_url = item.get('ItemURL', '')
         item_name = item.get('ItemName', '')
+        item_code = item.get('ItemCode', '')
 
         if not item_url or not item_name:
             logger.warning(f"必要な情報が不足しているため、処理を中止します: {item_name}")
@@ -92,7 +93,7 @@ async def main():
 
         # ROOMに投稿
         logger.info(f"ROOMに投稿しています: {item_name}")
-        result = await post_item_to_room(page, description)
+        result = await post_item_to_room(page, description, item_code)
         logger.info(f"投稿結果: {result.value}")
 
         if result is PostResult.POSTED:
