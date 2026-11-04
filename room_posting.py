@@ -2,7 +2,9 @@
 楽天Room投稿モジュール - 商品をROOMに投稿
 """
 import asyncio
+import json
 from enum import Enum
+from urllib.parse import quote, urljoin
 from playwright.async_api import (
     ElementHandle,
     Page,
@@ -10,6 +12,13 @@ from playwright.async_api import (
 )
 from logger import get_logger
 from rakuten_login import complete_login_form, is_login_page
+
+# ROOMの投稿画面（itemcodeに "ショップコード:商品ID" を付けて開く）
+ROOM_POST_URL = "https://room.rakuten.co.jp/mix?itemcode="
+# 商品ページ内のROOM投稿リンク
+ROOM_LINK_SELECTOR = 'a[href*="room.rakuten.co.jp/mix"]'
+# シェアボタンのメニュー内の要素（楽天Koboなど）
+SHARE_MENU_ITEM_SELECTOR = '.snsShare, a.item__room, [data-ratid="item_share_room"]'
  
  
 class PostResult(Enum):
@@ -24,88 +33,27 @@ class PostResult(Enum):
         return self is not PostResult.FAILED
 
 
-async def post_item_to_room(page: Page, description: str) -> PostResult:
+async def post_item_to_room(page: Page, description: str, item_code: str = '') -> PostResult:
     """
     商品ページからROOMに投稿
  
     Args:
         page: Playwrightのページオブジェクト (商品ページの状態)
         description: 紹介文
+        item_code: 商品コード（例: "shop:item"）。ROOM投稿リンクが見つからない場合に投稿画面のURLを組み立てるのに使う
  
     Returns:
         PostResult: 新規投稿 / すでにコレ済み / 失敗
     """
     try:
-        # ============================================================
-        # 「ROOMに投稿」ボタンを探す
-        # 通常ボタンが見つからない場合はシェアボタン経由で投稿する
-        # ============================================================
- 
-        # ① 通常の「ROOMに投稿」ボタンを探す
-        post_button = await find_post_button(page)
- 
-        if post_button:
-            active_page = await click_and_get_target_page(page, post_button)
-            print(f"[DEBUG] ROOMページへ遷移しました: {active_page.url}")
- 
-        else:
-            # ② 通常ボタンが見つからない場合はシェアボタン経由で投稿
-            print("[DEBUG] 通常の投稿ボタンが見つかりません。シェアボタンを試みます。")
- 
-            # シェアボタンを複数セレクタで探す
-            share_selectors = [
-                'button.snsShare__button',          # ① classで指定（最も確実）
-                "button:has-text('シェア')",         # ② テキストで指定
-                "a:has-text('シェア')",              # ③ aタグのテキストで指定
-            ]
- 
-            share_button = None
-            for selector in share_selectors:
-                try:
-                    share_button = await page.wait_for_selector(selector, timeout=5000)
-                    if share_button:
-                        print(f"[DEBUG] シェアボタンを発見しました（セレクタ: {selector}）")
-                        break
-                except Exception:
-                    print(f"[DEBUG] セレクタが見つかりません、次を試します: {selector}")
-                    continue
- 
-            if not share_button:
-                get_logger().error("シェアボタンが見つかりません")
-                return PostResult.FAILED
- 
-            await share_button.click()
-            await asyncio.sleep(1)
- 
-            # シェアメニューからROOM投稿リンクを探す
-            room_selectors = [
-                'a.item__room',                             # ① classで指定（最も確実）
-                'a[data-ratid="item_share_room"]',          # ② data属性で指定
-                'a[href*="room.rakuten.co.jp/mix"]',        # ③ hrefで指定
-                "a:has-text('ROOMに投稿する')",             # ④ テキストで指定
-                "button:has-text('ROOMに投稿する')",        # ⑤ buttonタグで指定
-            ]
- 
-            room_post_button = None
-            for selector in room_selectors:
-                try:
-                    room_post_button = await page.wait_for_selector(selector, timeout=5000)
-                    if room_post_button:
-                        print(f"[DEBUG] ROOMに投稿ボタンを発見しました（セレクタ: {selector}）")
-                        break
-                except Exception:
-                    print(f"[DEBUG] セレクタが見つかりません、次を試します: {selector}")
-                    continue
- 
-            if not room_post_button:
-                get_logger().error("「ROOMに投稿する」ボタンが見つかりません")
-                return PostResult.FAILED
- 
-            active_page = await click_and_get_target_page(page, room_post_button)
-            print(f"[DEBUG] ROOMページへ遷移しました: {active_page.url}")
+        active_page = await open_room_post_page(page, item_code)
+        if active_page is None:
+            get_logger().error("ROOMの投稿画面を開けませんでした（ROOMに投稿ボタン・シェアボタン・ItemCodeのいずれからも開けません）")
+            return PostResult.FAILED
+        print(f"[DEBUG] ROOMページへ遷移しました: {active_page.url}")
  
         await asyncio.sleep(2)
-        print("「ROOMに投稿」ボタンをクリックしました")
+        print("ROOMの投稿画面を開きました")
  
         # ============================================================
         # 紹介文を入力するテキストエリアを探す
@@ -220,6 +168,48 @@ async def post_item_to_room(page: Page, description: str) -> PostResult:
         return PostResult.FAILED
  
  
+async def open_room_post_page(page: Page, item_code: str = '') -> Page | None:
+    """
+    商品ページからROOMの投稿画面を開き、そのページ（同一タブまたは新しいタブ）を返す。
+
+    次の順に試し、開けなければNoneを返す。
+      ① 通常の「ROOMに投稿」ボタンをクリック
+      ② 商品ページ内のROOM投稿リンク（https://room.rakuten.co.jp/mix?itemcode=...）のURLを直接開く
+         楽天Kobo（ShopID 213310）などは「ROOMに投稿」ボタンが無く、シェアボタンのメニュー内にリンクがある。
+         閉じたメニュー内のリンクはクリックできないため、URLを読み取って開く
+      ③ シェアボタンからメニューを開き、「ROOMに投稿する」をクリック
+      ④ ItemCodeからROOMの投稿画面のURLを組み立てて開く
+    """
+    post_button = await find_post_button(page)
+    if post_button:
+        try:
+            return await click_and_get_target_page(page, post_button)
+        except PlaywrightTimeoutError as e:
+            # 再認証の失敗（RuntimeError）はここで拾わない。別の方法で開き直すとパスワードを再送信してしまうため
+            print(f"[DEBUG] 「ROOMに投稿」ボタンからROOMへ遷移できませんでした。別の方法を試します: {e}")
+    else:
+        print("[DEBUG] 通常の投稿ボタンが見つかりません。シェアボタンのROOM投稿リンクを試みます。")
+
+    room_url = await find_room_link_url(page)
+    if room_url:
+        print(f"[DEBUG] ROOM投稿リンクのURLを開きます: {room_url}")
+        return await goto_room_page(page, room_url)
+
+    room_post_button = await open_share_menu_and_find_room_button(page)
+    if room_post_button:
+        try:
+            return await click_and_get_target_page(page, room_post_button)
+        except PlaywrightTimeoutError as e:
+            print(f"[DEBUG] シェアメニューの「ROOMに投稿する」からROOMへ遷移できませんでした: {e}")
+
+    if item_code:
+        room_url = ROOM_POST_URL + quote(item_code, safe='')
+        print(f"[DEBUG] ItemCodeからROOMの投稿画面を開きます: {room_url}")
+        return await goto_room_page(page, room_url)
+
+    return None
+
+
 async def find_post_button(page: Page):
     """
     「ROOMに投稿」ボタンを探す
@@ -242,11 +232,83 @@ async def find_post_button(page: Page):
     for selector in selectors:
         try:
             button = await page.wait_for_selector(selector, timeout=3000)
-            if button and await button.is_visible():
+            # シェアメニュー内の「ROOMに投稿する」は、メニューが閉じていても表示中と判定されるがクリックできないため除く
+            if button and await button.is_visible() and not await is_in_share_menu(button):
                 return button
         except Exception:
             continue
  
+    return None
+
+
+async def is_in_share_menu(element: ElementHandle) -> bool:
+    """シェアボタンのメニュー内の要素かどうか"""
+    return await element.evaluate(
+        f"(el) => !!el.closest({json.dumps(SHARE_MENU_ITEM_SELECTOR)})"
+    )
+
+
+async def find_room_link_url(page: Page) -> str | None:
+    """商品ページ内のROOM投稿リンクのURLを返す（シェアメニューが閉じていて見えないリンクも対象）"""
+    link = page.locator(ROOM_LINK_SELECTOR).first
+    try:
+        await link.wait_for(state='attached', timeout=5000)
+        href = await link.get_attribute('href')
+    except Exception:
+        return None
+    return urljoin(page.url, href) if href else None
+
+
+async def open_share_menu_and_find_room_button(page: Page):
+    """シェアボタンを押してメニューを開き、「ROOMに投稿する」ボタンを返す（見つからなければNone）"""
+    share_selectors = [
+        'button.snsShare__button',          # ① classで指定（最も確実）
+        "button:has-text('シェア')",         # ② テキストで指定
+        "a:has-text('シェア')",              # ③ aタグのテキストで指定
+    ]
+
+    share_button = None
+    for selector in share_selectors:
+        try:
+            share_button = await page.wait_for_selector(selector, timeout=5000)
+            if share_button:
+                print(f"[DEBUG] シェアボタンを発見しました（セレクタ: {selector}）")
+                break
+        except Exception:
+            print(f"[DEBUG] セレクタが見つかりません、次を試します: {selector}")
+            continue
+
+    if not share_button:
+        print("[DEBUG] シェアボタンが見つかりません")
+        return None
+
+    try:
+        await share_button.click(timeout=15000)
+    except Exception as e:
+        print(f"[DEBUG] シェアボタンをクリックできませんでした: {e}")
+        return None
+    await asyncio.sleep(1)
+
+    # シェアメニューからROOM投稿ボタンを探す
+    room_selectors = [
+        'a.item__room',                             # ① classで指定（最も確実）
+        'a[data-ratid="item_share_room"]',          # ② data属性で指定
+        ROOM_LINK_SELECTOR,                         # ③ hrefで指定
+        "a:has-text('ROOMに投稿する')",             # ④ テキストで指定
+        "button:has-text('ROOMに投稿する')",        # ⑤ buttonタグで指定
+    ]
+
+    for selector in room_selectors:
+        try:
+            room_post_button = await page.wait_for_selector(selector, timeout=5000)
+            if room_post_button:
+                print(f"[DEBUG] ROOMに投稿ボタンを発見しました（セレクタ: {selector}）")
+                return room_post_button
+        except Exception:
+            print(f"[DEBUG] セレクタが見つかりません、次を試します: {selector}")
+            continue
+
+    print("[DEBUG] 「ROOMに投稿する」ボタンが見つかりません")
     return None
 
 
@@ -284,20 +346,36 @@ async def click_and_get_target_page(page: Page, button: ElementHandle):
         if target_page is page:
             same_page_task.result()  # タイムアウトしていれば例外を送出する
 
-        if is_login_page(target_page.url):
-            get_logger().info("ROOMへの投稿前に再認証を求められたため、ログインします")
-            if not await complete_login_form(target_page):
-                raise RuntimeError("ROOM投稿前の再認証に失敗しました")
-
-        await target_page.wait_for_url('**/room.rakuten.co.jp/**', wait_until='commit', timeout=120000)
-        await target_page.wait_for_load_state('domcontentloaded', timeout=120000)
-        return target_page
+        return await wait_for_room_page(target_page)
     finally:
         # 待機タスクを片付け、未回収の例外（Task exception was never retrieved）を出さないようにする
         for task in (new_page_task, same_page_task):
             if not task.done():
                 task.cancel()
         await asyncio.gather(new_page_task, same_page_task, return_exceptions=True)
+
+
+async def goto_room_page(page: Page, url: str) -> Page:
+    """ROOMの投稿画面のURLを同じタブで開く（再認証を求められた場合は認証してからROOMへ進む）"""
+    await page.goto(url, wait_until='commit', timeout=120000)
+    return await wait_for_room_page(page)
+
+
+async def wait_for_room_page(target_page: Page) -> Page:
+    """
+    ROOMのページが表示されるまで待つ。
+    ROOMへ遷移する前に再認証（楽天のログイン画面）を求められた場合は、認証を完了させてからROOMへ進む。
+    """
+    # ROOMのURLを開いた直後に再認証画面へ転送されることがあるため、読み込みを待ってから判定する
+    await target_page.wait_for_load_state('domcontentloaded', timeout=120000)
+    if is_login_page(target_page.url):
+        get_logger().info("ROOMへの投稿前に再認証を求められたため、ログインします")
+        if not await complete_login_form(target_page):
+            raise RuntimeError("ROOM投稿前の再認証に失敗しました")
+
+    await target_page.wait_for_url('**/room.rakuten.co.jp/**', wait_until='commit', timeout=120000)
+    await target_page.wait_for_load_state('domcontentloaded', timeout=120000)
+    return target_page
 
 
 async def is_already_collected(page: Page, timeout: int = 5000) -> bool:
