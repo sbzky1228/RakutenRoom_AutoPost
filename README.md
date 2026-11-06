@@ -16,6 +16,7 @@ Googleスプレッドシートに登録した楽天市場の商品を、ChatGPT�
 | `google_sheets_utils.py` | Google Sheets APIへの接続（サービスアカウント認証） |
 | `google_sheets_manager.py` | 未投稿商品の取得、投稿ステータスの更新 |
 | `chatgpt_manager.py` | ChatGPT（OpenAI API）での紹介文生成 |
+| `line_notifier.py` | 投稿結果のLINE通知（LINE Messaging API） |
 | `room_posting.py` | 商品ページからROOMへの投稿処理 |
 | `logger.py` | ログ出力（コンソールとログファイル） |
 | `.env.example` | `.env`（設定ファイル）のひな形 |
@@ -41,6 +42,7 @@ Googleスプレッドシートに登録した楽天市場の商品を、ChatGPT�
    ├─ 新規投稿 / すでにコレ済み → PostStatus「済」、PostedDateに実行日
    └─ 失敗                       → PostStatus「不可」、PostedDateに実行日
 9. ブラウザ終了
+10. 投稿結果をLINEに通知（LINEの設定がある場合のみ）
 ```
 
 ## 必要な環境
@@ -80,6 +82,8 @@ playwright install
 | `SERVICE_ACCOUNT_PATH` | ○ | サービスアカウントのJSONキーのパス（相対パスは `.env` のあるフォルダ基準） |
 | `OPENAI_API_KEY` | ○ | OpenAIのAPIキー |
 | `OPENAI_MODEL` | | 紹介文の生成に使うモデル（省略時は `gpt-6.1-sol`） |
+| `LINE_CHANNEL_ACCESS_TOKEN` | | LINE通知に使うチャネルアクセストークン（[LINE通知の設定](#5-line通知の設定任意) 参照） |
+| `LINE_USER_ID` | | 通知先の自分のLINEのユーザーID（`U` で始まる33文字） |
 | `PLAYWRIGHT_BROWSERS_PATH` | | Playwrightのブラウザのインストール先（通常は指定不要） |
 
 > **Windowsのパスはシングルクォートで囲んでください。**
@@ -123,6 +127,35 @@ playwright install
 | `不可` | 投稿に失敗した（投稿対象から外れる。再投稿したい場合は `未` に戻す） |
 
 - 同じ `ItemURL` の行が複数ある場合は、`未` の行のステータスを更新します。
+
+### 5. LINE通知の設定（任意）
+実行するたびに、投稿結果をLINEに通知できます。設定しない場合は通知せずに動作します。
+（LINE Notify は2025年3月31日にサービスが終了したため、LINE Messaging API を使います。）
+
+1. [LINE Developers](https://developers.line.biz/console/) にLINEアカウントでログインし、プロバイダーを作成する
+2. プロバイダーの中で「Messaging API」チャネル（LINE公式アカウント）を作成する
+3. チャネルの「Messaging API設定」タブで、チャネルアクセストークン（長期）を発行し、`.env` の `LINE_CHANNEL_ACCESS_TOKEN` に設定する
+4. チャネルの「チャネル基本設定」タブの「あなたのユーザーID」（`U` で始まる文字列）を、`.env` の `LINE_USER_ID` に設定する
+5. 「Messaging API設定」タブのQRコードを自分のLINEで読み取り、公式アカウントを友だち追加する（追加しないと通知が届きません）
+
+通知の例:
+```
+【楽天ROOM自動投稿】
+結果: 新規投稿
+商品: ○○○○
+URL: https://item.rakuten.co.jp/...
+残りの未投稿: 12件
+```
+
+| 結果 | 通知されるタイミング |
+|---|---|
+| `新規投稿` / `すでにコレ済み` / `失敗` | ROOMへの投稿を試みたとき |
+| `失敗（紹介文の生成に失敗）` | ChatGPTで紹介文を作れなかったとき |
+| `投稿対象なし` | PostStatusが「未」の商品が無いとき |
+| `エラー` | スプレッドシート接続・楽天ログインの失敗など、途中で処理が止まったとき |
+
+- 無料プランでは、1か月に送れるメッセージ数に上限があります（1日1回の実行なら上限内に収まります）。
+- 通知に失敗しても、投稿処理やスプレッドシートの更新には影響しません（ログに `[ERROR] LINEへの通知に失敗しました` と記録されます）。
 
 ## 実行方法
 

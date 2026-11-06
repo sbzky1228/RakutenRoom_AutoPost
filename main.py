@@ -10,12 +10,14 @@ from google_sheets_utils import connect_to_sheets_and_get_existing_codes
 from chatgpt_manager import generate_description
 from room_posting import PostResult, post_item_to_room
 from logger import get_logger
+from line_notifier import send_line_message
 
 
 async def main():
     """メイン処理"""
     logger = get_logger()
     browser_manager = None
+    notice = None  # 処理の最後にLINEへ通知する内容
 
     try:
         logger.info("=" * 80)
@@ -32,6 +34,7 @@ async def main():
 
         if service is None:
             logger.error("スプレッドシートへの接続に失敗しました。処理を終了します。")
+            notice = "結果: エラー\nスプレッドシートへの接続に失敗しました"
             return
 
         logger.info(f"接続成功（既存商品数: {len(existing_item_codes)}件）")
@@ -44,6 +47,7 @@ async def main():
 
         if not unposted_items:
             logger.info("投稿対象の商品がありません")
+            notice = "結果: 投稿対象なし\nPostStatusが「未」の商品がありません"
             return
 
         logger.info(f"{len(unposted_items)}件の投稿対象商品があります")
@@ -61,6 +65,7 @@ async def main():
         logger.info("楽天にログインしています...")
         if not await login_to_rakuten(page):
             logger.error("楽天へのログインに失敗しました")
+            notice = "結果: エラー\n楽天へのログインに失敗しました"
             return
 
         # 1件だけ処理
@@ -70,6 +75,7 @@ async def main():
 
         if not item_url or not item_name:
             logger.warning(f"必要な情報が不足しているため、処理を中止します: {item_name}")
+            notice = f"結果: エラー\nItemURLまたはItemNameが空のため処理を中止しました\n商品: {item_name}\nURL: {item_url}"
             return
 
         logger.info(f"商品を処理しています: {item_name}")
@@ -89,12 +95,15 @@ async def main():
         if not description:
             logger.warning(f"紹介文の生成に失敗したため、処理を中止します: {item_name}")
             sheets_manager.update_post_status_by_url(item_url, '不可', posted_date)
+            notice = f"結果: 失敗（紹介文の生成に失敗）\n商品: {item_name}\nURL: {item_url}"
             return
 
         # ROOMに投稿
         logger.info(f"ROOMに投稿しています: {item_name}")
         result = await post_item_to_room(page, description, item_code)
         logger.info(f"投稿結果: {result.value}")
+        remaining = len(unposted_items) - 1
+        notice = f"結果: {result.value}\n商品: {item_name}\nURL: {item_url}\n残りの未投稿: {remaining}件"
 
         if result is PostResult.POSTED:
             logger.info(f"【新規投稿】ROOMに新しく投稿しました: {item_name}")
@@ -117,12 +126,17 @@ async def main():
         logger.error(f"予期しないエラーが発生しました: {e}")
         import traceback
         logger.error(traceback.format_exc())
+        notice = f"結果: エラー\n予期しないエラーが発生しました: {e}"
 
     finally:
         # ブラウザを閉じる
         if browser_manager:
             logger.info("ブラウザを閉じています...")
             await browser_manager.close()
+
+        # 投稿結果をLINEに通知する（.envにLINEの設定がある場合のみ）
+        if notice:
+            send_line_message(notice)
 
 
 if __name__ == "__main__":

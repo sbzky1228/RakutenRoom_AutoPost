@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import chatgpt_manager
 import config
+import line_notifier
 import logger as logger_module
 from google_sheets_manager import GoogleSheetsManager
 from rakuten_login import is_login_page
@@ -170,6 +171,72 @@ def test_description_empty_or_error_returns_empty(monkeypatch):
     assert chatgpt_manager.generate_description('テスト商品') == ''
     fake_openai(monkeypatch, error=RuntimeError('insufficient_quota'))
     assert chatgpt_manager.generate_description('テスト商品') == ''
+
+
+# ---------------------------------------------------------------------------
+# LINE通知（LINE Messaging API は偽物に置き換える）
+# ---------------------------------------------------------------------------
+
+def fake_line(monkeypatch, token='test-token', user_id='U0123', error=None):
+    requests = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        if error:
+            raise error
+        return FakeResponse()
+
+    monkeypatch.setattr(line_notifier, 'LINE_CHANNEL_ACCESS_TOKEN', token)
+    monkeypatch.setattr(line_notifier, 'LINE_USER_ID', user_id)
+    monkeypatch.setattr(line_notifier.urllib.request, 'urlopen', fake_urlopen)
+    return requests
+
+
+def test_line_message_is_pushed_to_user(monkeypatch):
+    import json
+    requests = fake_line(monkeypatch)
+    assert line_notifier.send_line_message('結果: 新規投稿\n商品: テスト商品')
+    request = requests[0]
+    assert request.full_url == 'https://api.line.me/v2/bot/message/push'
+    assert request.get_header('Authorization') == 'Bearer test-token'
+    body = json.loads(request.data.decode('utf-8'))
+    assert body['to'] == 'U0123'
+    assert body['messages'] == [{'type': 'text', 'text': '【楽天ROOM自動投稿】\n結果: 新規投稿\n商品: テスト商品'}]
+
+
+def test_line_not_sent_without_settings(monkeypatch):
+    requests = fake_line(monkeypatch, token='')
+    assert not line_notifier.send_line_message('結果: 新規投稿')
+    requests += fake_line(monkeypatch, user_id='')
+    assert not line_notifier.send_line_message('結果: 新規投稿')
+    assert requests == []
+
+
+def test_line_error_is_logged_not_raised(monkeypatch, log_to_tmp):
+    import io
+    import urllib.error
+    error = urllib.error.HTTPError(
+        line_notifier.LINE_PUSH_URL, 401, 'Unauthorized', {}, io.BytesIO(b'{"message":"Authentication failed"}'))
+    fake_line(monkeypatch, error=error)
+    # 通知に失敗しても例外は出さず、投稿処理を止めない
+    assert not line_notifier.send_line_message('結果: 新規投稿')
+    text = Path(log_to_tmp.log_file).read_text(encoding='utf-8')
+    assert '[ERROR] LINEへの通知に失敗しました（HTTP 401）: {"message":"Authentication failed"}' in text
+
+
+def test_line_message_is_truncated_to_limit(monkeypatch):
+    import json
+    requests = fake_line(monkeypatch)
+    line_notifier.send_line_message('あ' * 6000)
+    body = json.loads(requests[0].data.decode('utf-8'))
+    assert len(body['messages'][0]['text']) == line_notifier.MAX_TEXT_LENGTH
 
 
 # ---------------------------------------------------------------------------

@@ -72,6 +72,10 @@ SERVICE_ACCOUNT_PATH = _resolve_path_from_env(os.getenv('SERVICE_ACCOUNT_PATH', 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-6.1-sol')  # 紹介文生成に使うモデル
 
+# LINE通知（LINE Messaging API）。未設定の場合は通知しない
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN', '')
+LINE_USER_ID = os.getenv('LINE_USER_ID', '')
+
 # Playwrightの設定
 # - PLAYWRIGHT_BROWSERS_PATH は .env または環境変数から読み取ります
 # - 実行ファイル起動時に未指定の場合は、Windowsの既定パス (%LOCALAPPDATA%\ms-playwright) を自動検出します
